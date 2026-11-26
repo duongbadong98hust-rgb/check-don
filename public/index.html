@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="vi"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chốt đơn - Tạo mã & in tem</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1c1e21; --muted:#65676b; --accent:#e11d48; --line:#e4e6eb; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#18191a; --card:#242526; --text:#e4e6eb; --muted:#b0b3b8; --line:#3a3b3c; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.4 system-ui,Arial,sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:16px; }
+  h1 { font-size:1.3rem; margin:0 0 12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  label { display:block; font-size:.85rem; color:var(--muted); margin-bottom:4px; }
+  input, select { width:100%; padding:10px; font-size:1rem; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  button, a.btn { display:inline-block; padding:10px 16px; font-size:1rem; border:0; border-radius:8px; background:var(--accent); color:#fff; cursor:pointer; text-decoration:none; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .muted { color:var(--muted); font-size:.9rem; }
+  #msg { margin-top:8px; min-height:1.2em; }
+  .err { color:#dc2626; }
+  table { width:100%; border-collapse:collapse; }
+  td, th { padding:8px 4px; border-bottom:1px solid var(--line); text-align:left; }
+  td a { color:var(--accent); }
+</style></head>
+<body><main>
+  <h1>Tạo mã & in tem A6</h1>
+
+  <div class="card">
+    <p class="muted" id="stats">Đang tải…</p>
+    <div class="row">
+      <div><label for="count">Số lượng mã</label><input id="count" type="number" min="1" value="50" inputmode="numeric"></div>
+      <div><label for="price">Giá (đ)</label><input id="price" type="number" min="0" step="1000" value="49000" inputmode="numeric"></div>
+    </div>
+    <div class="actions"><button id="create">Tạo mã</button></div>
+    <div id="msg"></div>
+  </div>
+
+  <div class="card">
+    <label for="layout">Số tem trên một tờ A6</label>
+    <select id="layout"></select>
+    <div class="actions">
+      <a class="btn" id="printAll" target="_blank" rel="noopener">In tất cả mã</a>
+      <button class="ghost" id="reset">Buổi live mới (xoá hết mã)</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1.05rem;margin:0 0 8px">Các lô đã tạo</h2>
+    <table id="batches"><thead><tr><th>Lô</th><th>Số mã</th><th>Giá</th><th></th></tr></thead><tbody></tbody></table>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => new Intl.NumberFormat('vi-VN').format(n) + 'đ';
+const api = async (url, opt) => {
+  const r = await fetch(url, opt && { headers:{'Content-Type':'application/json'}, ...opt });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || 'Lỗi');
+  return j;
+};
+const printUrl = (batch) => `/print?${batch ? 'batch=' + batch + '&' : ''}layout=${$('layout').value}`;
+
+async function load() {
+  const [s, layouts, batches] = await Promise.all([api('/api/stats'), api('/api/layouts'), api('/api/batches')]);
+  $('stats').textContent = `Đã dùng ${s.used}/${s.capacity} mã · còn trống ${s.free}`;
+  if (!$('layout').options.length) {
+    layouts.forEach((l) => {
+      const o = new Option(`${l.perPage} tem/tờ (mỗi tem ≈ ${l.widthMm}×${l.heightMm} mm)`, l.key, l.default, l.default);
+      $('layout').add(o);
+    });
+  }
+  $('printAll').href = printUrl();
+  const tb = $('batches').tBodies[0];
+  tb.innerHTML = '';
+  batches.forEach((b) => {
+    const tr = tb.insertRow();
+    tr.insertCell().textContent = '#' + b.id;
+    tr.insertCell().textContent = b.count;
+    tr.insertCell().textContent = fmt(b.price);
+    const a = document.createElement('a');
+    a.textContent = 'In lô này'; a.href = printUrl(b.id); a.target = '_blank'; a.rel = 'noopener';
+    a.dataset.batch = b.id; a.className = 'printBatch';
+    tr.insertCell().append(a);
+  });
+}
+
+$('layout').addEventListener('change', () => {
+  $('printAll').href = printUrl();
+  document.querySelectorAll('.printBatch').forEach((a) => (a.href = printUrl(a.dataset.batch)));
+});
+
+$('create').addEventListener('click', async () => {
+  $('msg').textContent = ''; $('msg').className = '';
+  try {
+    const b = await api('/api/batches', { method:'POST', body: JSON.stringify({ count:+$('count').value, price:+$('price').value }) });
+    $('msg').textContent = `Đã tạo ${b.count} mã (${b.codes[0]} → ${b.codes[b.codes.length - 1]}), giá ${fmt(b.price)}.`;
+    await load();
+  } catch (e) { $('msg').textContent = e.message; $('msg').className = 'err'; }
+});
+
+$('reset').addEventListener('click', async () => {
+  if (!confirm('Xoá toàn bộ mã của buổi live cũ?')) return;
+  await api('/api/reset', { method:'POST' });
+  $('msg').textContent = 'Đã xoá hết mã.'; $('msg').className = '';
+  await load();
+});
+
+load();
+</script></body></html>
