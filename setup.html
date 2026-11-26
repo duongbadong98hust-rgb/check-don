@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cài đặt Check đơn</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body { padding-bottom: 30px; }
+    pre { white-space: pre-wrap; word-break: break-word; font-size: 11px; max-height: 200px; overflow: auto;
+      background: #f0f1f4; padding: 10px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <div class="screen">
+    <header class="top"><h2>Cài đặt cơ sở dữ liệu</h2></header>
+    <div class="card">
+      <p>1. Bấm nút dưới để sao chép đoạn lệnh.</p>
+      <button id="copy" class="btn primary big">📋 Sao chép lệnh cài đặt</button>
+      <p id="msg" class="status ok" hidden></p>
+      <p>2. Mở Supabase → <b>SQL Editor</b> → dán vào ô trống → bấm <b>Run</b>.</p>
+      <p class="muted">Thấy chữ "Success. No rows returned" là xong.</p>
+      <pre id="sql">Đang tải…</pre>
+    </div>
+  </div>
+  <script>
+    fetch('setup.sql').then((r) => r.text()).then((t) => { document.getElementById('sql').textContent = t; });
+    document.getElementById('copy').onclick = async () => {
+      const t = document.getElementById('sql').textContent;
+      const m = document.getElementById('msg');
+      try { await navigator.clipboard.writeText(t); }
+      catch {
+        const r = document.createRange(); r.selectNodeContents(document.getElementById('sql'));
+        const s = getSelection(); s.removeAllRanges(); s.addRange(r); document.execCommand('copy');
+      }
+      m.textContent = '✓ Đã sao chép. Giờ sang Supabase dán vào SQL Editor.'; m.hidden = false;
+    };
+  </script>
+</body>
+</html>

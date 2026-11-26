@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#ee4d2d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Check đơn">
+  <title>Check đơn</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- ĐĂNG NHẬP -->
+  <section id="screen-login" class="screen" hidden>
+    <div class="login-box">
+      <div class="logo">📦</div>
+      <h1>Check đơn</h1>
+      <p class="muted">Kiểm đóng hàng</p>
+      <form id="login-form">
+        <label id="email-wrap">Email
+          <input id="login-email" type="email" autocomplete="username" required>
+        </label>
+        <label>Mật khẩu
+          <input id="login-pass" type="password" autocomplete="current-password" required>
+        </label>
+        <button class="btn primary big" type="submit">Đăng nhập</button>
+        <p id="login-error" class="error"></p>
+      </form>
+    </div>
+  </section>
+
+  <!-- ĐÓNG HÀNG -->
+  <section id="screen-pack" class="screen" hidden>
+    <header class="top"><h2>Đóng hàng</h2></header>
+    <div id="storage-warning" class="banner warn" hidden></div>
+
+    <div class="card">
+      <div class="step"><span class="num">1</span> Quét tem đơn</div>
+      <label class="btn primary big file-btn">
+        📷 Chụp tem đơn
+        <input id="label-input" type="file" accept="image/*" capture="environment" hidden>
+      </label>
+      <p class="hint">Chụp rõ phần mã QR và chữ "Đến:" trên tem.</p>
+      <div id="label-status" class="status" hidden></div>
+      <img id="label-preview" class="label-preview" alt="" hidden>
+
+      <label>Mã vận đơn
+        <input id="f-tracking" type="text" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="SPXVN...">
+      </label>
+      <label>Tên khách
+        <input id="f-customer" type="text" autocomplete="off" placeholder="Tên người nhận">
+      </label>
+      <div id="dup-warning" class="banner warn" hidden></div>
+    </div>
+
+    <div class="card">
+      <div class="step"><span class="num">2</span> Chụp hàng</div>
+      <label class="btn primary big file-btn">
+        📸 Chụp hàng
+        <input id="photo-input" type="file" accept="image/*" capture="environment" hidden>
+      </label>
+      <p class="hint">Chụp được nhiều ảnh, mỗi lần bấm là 1 ảnh.</p>
+      <div id="photo-grid" class="grid"></div>
+    </div>
+
+    <div class="card sticky-save">
+      <button id="save-btn" class="btn success big" disabled>✅ Lưu đơn</button>
+      <div id="save-status" class="status" hidden></div>
+    </div>
+  </section>
+
+  <!-- TRA CỨU -->
+  <section id="screen-search" class="screen" hidden>
+    <header class="top"><h2>Tra cứu</h2></header>
+    <div class="card">
+      <form id="search-form" class="row">
+        <input id="q" type="search" placeholder="Tên khách hoặc mã vận đơn" autocomplete="off">
+        <button class="btn primary" type="submit">Tìm</button>
+      </form>
+      <label class="btn ghost file-btn">
+        📷 Quét tem để tìm
+        <input id="search-label-input" type="file" accept="image/*" capture="environment" hidden>
+      </label>
+      <div id="search-status" class="status" hidden></div>
+    </div>
+    <div id="results"></div>
+    <div class="card small">
+      <div id="usage" class="muted"></div>
+      <button id="logout-btn" class="btn ghost">Đăng xuất</button>
+    </div>
+  </section>
+
+  <!-- CHI TIẾT ĐƠN -->
+  <section id="screen-detail" class="screen" hidden>
+    <header class="top">
+      <button id="back-btn" class="btn ghost">← Quay lại</button>
+    </header>
+    <div class="card" id="detail-info"></div>
+    <div id="detail-photos"></div>
+    <div class="card small">
+      <button id="delete-btn" class="btn danger">Xoá đơn này</button>
+    </div>
+  </section>
+
+  <nav id="tabs" class="tabs" hidden>
+    <button data-tab="pack" class="active">📦<span>Đóng hàng</span></button>
+    <button data-tab="search">🔍<span>Tra cứu</span></button>
+  </nav>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="config.js"></script>
+  <script src="vendor/supabase.js"></script>
+  <script src="vendor/zxing-reader.js"></script>
+  <script src="vendor/tesseract.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
