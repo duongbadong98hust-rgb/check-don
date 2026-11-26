@@ -17,6 +17,9 @@ create index if not exists orders_tracking_idx  on public.orders (tracking);
 create index if not exists orders_packed_at_idx on public.orders (packed_at desc);
 
 -- Chỉ tài khoản đã đăng nhập mới đọc/ghi được
+grant select, insert, update, delete on public.orders to authenticated;
+grant usage, select on sequence public.orders_id_seq to authenticated;
+revoke all on public.orders from anon;
 alter table public.orders enable row level security;
 drop policy if exists "orders_logged_in" on public.orders;
 create policy "orders_logged_in" on public.orders
