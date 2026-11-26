@@ -89,14 +89,31 @@ export function createLive(db: Db, onChange: () => void = () => {}) {
       onChange();
     },
 
+    /** Comment gần đây, mỗi mã trong comment kèm tình trạng lượt đặt của người đó (để hiện nút Chốt ngay tại comment). */
     comments(limit = 200) {
       const rows = raw.prepare('SELECT * FROM comments ORDER BY id DESC LIMIT ?').all(limit) as unknown as {
         id: number; user_id: string; name: string; text: string; ts: number; codes: string;
       }[];
-      return rows.reverse().map((r) => ({
-        id: r.id, userId: r.user_id, name: r.name, text: r.text, ts: r.ts,
-        codes: r.codes ? r.codes.split(' ') : [],
-      }));
+      const bidStmt = raw.prepare(
+        "SELECT * FROM bids WHERE code = ? AND user_id = ? ORDER BY (state = 'dropped'), id DESC LIMIT 1",
+      );
+      const availCache = new Map<string, number>();
+      const availOf = (code: string) => {
+        let a = availCache.get(code);
+        if (a === undefined) availCache.set(code, (a = qtyOf(code) - wonCount(code)));
+        return a;
+      };
+      return rows.reverse().map((r) => {
+        const codes = r.codes ? r.codes.split(' ') : [];
+        return {
+          id: r.id, userId: r.user_id, name: r.name, text: r.text, ts: r.ts,
+          codes,
+          bids: codes.map((code) => {
+            const b = bidStmt.get(code, r.user_id) as unknown as BidRow | undefined;
+            return { code, bidId: b?.id ?? null, state: b?.state ?? 'dropped', paid: !!b?.paid, available: availOf(code) };
+          }),
+        };
+      });
     },
 
     /** Bảng mã đang có người đặt: ai đang giữ, ai đang xếp hàng (người comment sớm nhất lên đầu). */

@@ -26,6 +26,10 @@
   .cm.hit { background:var(--chip); }
   .cm b { margin-right:6px; }
   .chip { display:inline-block; background:var(--accent); color:#fff; border-radius:5px; padding:0 6px; font-weight:800; margin-left:4px; letter-spacing:.3px; }
+  .cm .acts { display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; align-items:center; }
+  .cm .acts .st { font-size:.8rem; color:var(--muted); }
+  .cm .acts .st.ok { color:var(--ok); font-weight:700; }
+  button.big { padding:8px 16px; font-size:1rem; font-weight:700; }
   .card { border:1px solid var(--line); border-radius:10px; padding:10px; margin-bottom:8px; }
   .card.full { border-color:var(--warn); }
   .card .top { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
@@ -115,6 +119,17 @@ function renderComments(list) {
     const d = el('div', 'cm' + (c.codes.length ? ' hit' : ''));
     d.append(el('b', '', c.name), document.createTextNode(c.text));
     for (const code of c.codes) d.append(el('span', 'chip', code));
+    if (c.bids.length) {
+      // Nút Chốt ngay tại comment: chốt đúng cho người này
+      const acts = el('div', 'acts');
+      for (const b of c.bids) {
+        if (b.state === 'won') acts.append(el('span', 'st ok', `✓ ${b.code} đã chốt${b.paid ? ' · đã CK' : ''}`));
+        else if (b.state === 'dropped') acts.append(el('span', 'st', `${b.code} đã bỏ`));
+        else if (b.available > 0) acts.append(btn(`Chốt ${b.code}`, 'big', () => post(`/api/bids/${b.bidId}/win`)));
+        else acts.append(el('span', 'st', `${b.code} đã hết`));
+      }
+      d.append(acts);
+    }
     box.append(d);
   }
   if (stick) box.scrollTop = box.scrollHeight;
@@ -139,11 +154,11 @@ function renderBoard(board) {
       card.append(r);
     }
     c.waiting.forEach((w, i) => {
-      const canWin = i < c.available;
+      const canWin = c.available > 0;
       const r = el('div', 'row' + (i === 0 && canWin ? ' lead' : ''));
       r.append(el('span', 'nm', w.name), el('span', 'tm', hhmmss(w.ts)));
       if (i === 0 && canWin) r.append(el('span', 'tag lead', 'dẫn đầu'));
-      else if (!canWin) r.append(el('span', 'tm', 'chờ #' + (i + 1 - c.available)));
+      else if (!canWin) r.append(el('span', 'tm', 'chờ #' + (i + 1)));
       if (canWin) r.append(btn('Chốt', 'sm', () => post(`/api/bids/${w.bidId}/win`)));
       r.append(btn('Bỏ', 'g sm', () => post(`/api/bids/${w.bidId}/drop`)));
       card.append(r);

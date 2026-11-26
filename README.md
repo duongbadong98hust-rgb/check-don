@@ -17,6 +17,7 @@ Cần Node.js ≥ 22.18 (chạy TypeScript trực tiếp, SQLite có sẵn, khô
 
 **Màn hình live** (`/live.html`)
 - Comment hiện realtime (SSE), tự bắt mã trong comment (không phân biệt hoa/thường, chấp nhận "a 123").
+- Nút **Chốt ngay dưới từng comment** (chốt đúng người đó, không cần họ dẫn đầu).
 - Bảng mã: ai comment sớm nhất (theo giờ comment) dẫn đầu; bấm **Chốt**, **Bỏ**, hoặc **Hủy, chuyển người kế**.
 - Đơn theo khách: gom các mã đã chốt, tổng tiền, đánh dấu **Đã CK**, **in bill A6**.
 - Hiện đang dùng comment giả lập (ô nhập tay + nút tự chạy).

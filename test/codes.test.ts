@@ -76,7 +76,17 @@ test('live: người comment sớm nhất dẫn đầu, chốt, hủy thì ngư�
   assert.deepEqual(board[0].waiting.map((w) => w.name), ['Lan', 'Mai']);
   assert.equal(board[0].available, 1);
 
+  // comment nào cũng có sẵn bidId + tình trạng để hiện nút Chốt ngay tại comment
+  const cms = live.comments();
+  const maiBid = cms.find((c) => c.name === 'Mai')!.bids[0];
+  assert.equal(maiBid.code, 'A100');
+  assert.equal(maiBid.state, 'waiting');
+  assert.equal(maiBid.available, 1);
+  assert.deepEqual(cms.find((c) => c.name === 'Hoa')!.bids, []);
   live.win(board[0].waiting[0].bidId); // chốt Lan
+  const after = live.comments();
+  assert.equal(after.find((c) => c.name === 'Lan')!.bids[0].state, 'won');
+  assert.equal(after.find((c) => c.name === 'Mai')!.bids[0].available, 0);
   board = live.board();
   assert.deepEqual(board[0].won.map((w) => w.name), ['Lan']);
   assert.equal(board[0].available, 0);
