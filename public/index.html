@@ -26,6 +26,7 @@
 </style></head>
 <body><main>
   <h1>Tạo mã & in tem A6</h1>
+  <p><a href="/live.html" style="color:var(--accent);font-weight:700">→ Mở màn hình live</a></p>
 
   <div class="card">
     <p class="muted" id="stats">Đang tải…</p>
@@ -33,6 +34,7 @@
       <div><label for="count">Số lượng mã</label><input id="count" type="number" min="1" value="50" inputmode="numeric"></div>
       <div><label for="price">Giá (đ)</label><input id="price" type="number" min="0" step="1000" value="49000" inputmode="numeric"></div>
     </div>
+    <div style="margin-top:12px"><label for="qty">Số cái mỗi mã (đa số là 1)</label><input id="qty" type="number" min="1" value="1" inputmode="numeric"></div>
     <div class="actions"><button id="create">Tạo mã</button></div>
     <div id="msg"></div>
   </div>
@@ -94,7 +96,7 @@ $('layout').addEventListener('change', () => {
 $('create').addEventListener('click', async () => {
   $('msg').textContent = ''; $('msg').className = '';
   try {
-    const b = await api('/api/batches', { method:'POST', body: JSON.stringify({ count:+$('count').value, price:+$('price').value }) });
+    const b = await api('/api/batches', { method:'POST', body: JSON.stringify({ count:+$('count').value, price:+$('price').value, qty:+$('qty').value }) });
     $('msg').textContent = `Đã tạo ${b.count} mã (${b.codes[0]} → ${b.codes[b.codes.length - 1]}), giá ${fmt(b.price)}.`;
     await load();
   } catch (e) { $('msg').textContent = e.message; $('msg').className = 'err'; }

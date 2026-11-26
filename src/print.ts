@@ -27,7 +27,8 @@ export function renderLabelsHtml(codes: CodeRow[], layoutKey: string): string {
   const layout = LAYOUTS[layoutKey] ?? LAYOUTS[DEFAULT_LAYOUT];
   const perPage = layout.cols * layout.rows;
   const size = labelSizeMm(layout);
-  const codeFont = Math.min(size.h * 0.55, size.w * 0.55);
+  // Mã 4 ký tự (A123) phải vừa chiều ngang tem: mỗi ký tự rộng ≈ 0.72 lần cỡ chữ.
+  const codeFont = Math.min(size.h * 0.5, (size.w * 0.9) / 3.1);
   const priceFont = Math.min(size.h * 0.22, size.w * 0.17);
 
   const pages: CodeRow[][] = [];
@@ -62,7 +63,7 @@ export function renderLabelsHtml(codes: CodeRow[], layoutKey: string): string {
     border: 0.2mm dashed #888; display: flex; flex-direction: column;
     align-items: center; justify-content: center; line-height: 1; overflow: hidden;
   }
-  .code { font-size: ${codeFont.toFixed(1)}mm; font-weight: 800; letter-spacing: 0.5mm; }
+  .code { font-size: ${codeFont.toFixed(1)}mm; font-weight: 800; letter-spacing: 0.2mm; white-space: nowrap; }
   .price { font-size: ${priceFont.toFixed(1)}mm; font-weight: 700; margin-top: 1mm; }
   @media print {
     html, body { background: #fff; }
@@ -71,4 +72,47 @@ export function renderLabelsHtml(codes: CodeRow[], layoutKey: string): string {
   }
 </style></head>
 <body>${sheets || '<p style="padding:20px">Chưa có mã nào để in.</p>'}</body></html>`;
+}
+
+export interface BillOrder {
+  name: string;
+  items: { code: string; price: number; paid: boolean }[];
+  total: number;
+  paid: boolean;
+}
+
+/** Mỗi khách một tờ bill khổ A6. */
+export function renderBillsHtml(orders: BillOrder[]): string {
+  const sheets = orders
+    .map((o) => {
+      const rows = o.items
+        .map((i) => `<tr><td class="c">${esc(i.code)}</td><td class="p">${esc(formatPrice(i.price))}</td></tr>`)
+        .join('');
+      return `<section class="bill">
+        <h1>${esc(o.name)}</h1>
+        <table>${rows}</table>
+        <div class="sum"><span>${o.items.length} món</span><b>${esc(formatPrice(o.total))}</b></div>
+        <div class="st ${o.paid ? 'ok' : 'no'}">${o.paid ? 'ĐÃ CHUYỂN KHOẢN' : 'CHƯA CHUYỂN KHOẢN'}</div>
+      </section>`;
+    })
+    .join('');
+  return `<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><title>Bill A6 - ${orders.length} khách</title>
+<style>
+  @page { size: 105mm 148mm; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #ddd; font-family: Arial, Helvetica, sans-serif; }
+  .bill { width: 105mm; min-height: 148mm; padding: 8mm; background: #fff; margin: 0 auto 8px;
+    page-break-after: always; break-after: page; }
+  h1 { font-size: 6mm; margin: 0 0 4mm; border-bottom: 0.4mm solid #000; padding-bottom: 2mm; word-break: break-word; }
+  table { width: 100%; border-collapse: collapse; font-size: 4.6mm; }
+  td { padding: 1mm 0; border-bottom: 0.2mm dashed #aaa; }
+  td.c { font-weight: 800; letter-spacing: 0.2mm; }
+  td.p { text-align: right; }
+  .sum { display: flex; justify-content: space-between; margin-top: 4mm; font-size: 5mm; }
+  .sum b { font-size: 6.5mm; }
+  .st { margin-top: 5mm; text-align: center; font-weight: 800; font-size: 4mm; padding: 2mm; border: 0.4mm solid #000; }
+  .st.ok { background: #000; color: #fff; }
+  @media print { html, body { background: #fff; } .bill { margin: 0; } .bill:last-child { page-break-after: auto; break-after: auto; } }
+</style></head><body>${sheets || '<p style="padding:20px">Chưa có đơn nào.</p>'}</body></html>`;
 }
