@@ -39,7 +39,8 @@ export function openDb(file = 'data/check-don.db') {
       name TEXT NOT NULL,
       text TEXT NOT NULL,
       ts INTEGER NOT NULL,            -- giờ comment (ms), dùng để xếp "ai trước"
-      codes TEXT NOT NULL DEFAULT ''  -- các mã bắt được, cách nhau bởi dấu cách
+      codes TEXT NOT NULL DEFAULT '', -- các mã bắt được, cách nhau bởi dấu cách
+      fb_id TEXT                      -- ID comment trên Facebook (để không nhận trùng)
     );
     -- Một khách muốn một mã. state: waiting (đang chờ) | won (đã chốt) | dropped (bỏ/hủy)
     CREATE TABLE IF NOT EXISTS bids (
@@ -54,6 +55,10 @@ export function openDb(file = 'data/check-don.db') {
     );
     CREATE INDEX IF NOT EXISTS bids_code ON bids(code, state, ts);
   `);
+  // DB tạo từ bản cũ chưa có cột fb_id
+  const cols = raw.prepare('PRAGMA table_info(comments)').all() as { name: string }[];
+  if (!cols.some((c) => c.name === 'fb_id')) raw.exec('ALTER TABLE comments ADD COLUMN fb_id TEXT');
+  raw.exec('CREATE UNIQUE INDEX IF NOT EXISTS comments_fb ON comments(fb_id)');
 
   return {
     raw,

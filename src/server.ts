@@ -4,9 +4,36 @@ import { openDb } from './db.ts';
 import { createLive } from './live.ts';
 import { LAYOUTS, DEFAULT_LAYOUT, labelSizeMm, renderLabelsHtml, renderBillsHtml } from './print.ts';
 import { normalizeCode } from './codes.ts';
+import { createFacebookReader } from './facebook.ts';
+import type { FbConfig, FetchLike } from './facebook.ts';
+import { fbConfigFromEnv, loadEnv } from './config.ts';
+import { createHash, timingSafeEqual } from 'node:crypto';
 
-export function createApp(db = openDb()) {
+export interface AppOptions {
+  fbConfig?: FbConfig | null;
+  fetchImpl?: FetchLike; // dùng cho test (Facebook giả)
+  password?: string; // nếu có: bắt buộc nhập mật khẩu để vào web
+}
+
+const sha = (s: string) => createHash('sha256').update(s).digest();
+
+export function createApp(db = openDb(), opts: AppOptions = {}) {
   const app = express();
+  app.disable('x-powered-by');
+
+  // Mật khẩu bảo vệ (HTTP Basic): tên đăng nhập gõ gì cũng được, chỉ cần đúng mật khẩu.
+  if (opts.password) {
+    const want = sha(opts.password);
+    app.use((req, res, next) => {
+      const [scheme, b64] = (req.headers.authorization ?? '').split(' ');
+      if (scheme === 'Basic' && b64) {
+        const pass = Buffer.from(b64, 'base64').toString().split(':').slice(1).join(':');
+        if (timingSafeEqual(sha(pass), want)) return next();
+      }
+      res.set('WWW-Authenticate', 'Basic realm="check-don"').status(401).send('Cần mật khẩu');
+    });
+  }
+
   app.use(express.json());
   app.use(express.static('public'));
 
@@ -24,6 +51,12 @@ export function createApp(db = openDb()) {
     const ping = setInterval(() => res.write(': ping\n\n'), 25000);
     req.on('close', () => { clearInterval(ping); clients.delete(res); });
   });
+
+  // Facebook: đọc comment live thật, đẩy vào cùng cửa nhận comment với bản giả lập.
+  const fb = opts.fbConfig
+    ? createFacebookReader({ config: opts.fbConfig, fetchImpl: opts.fetchImpl, onComment: (c) => live.addComment(c) !== null })
+    : null;
+  app.locals.fb = fb;
 
   const bad = (res: Response, e: unknown, status = 400) => res.status(status).json({ error: (e as Error).message });
 
@@ -72,9 +105,33 @@ export function createApp(db = openDb()) {
     res.json({ code, price, qty });
   });
 
+  app.get('/api/facebook/status', (_req, res) => {
+    res.json(
+      fb
+        ? fb.status()
+        : { configured: false, state: 'off', liveVideoId: null, liveTitle: null, comments: 0, lastCommentAt: null,
+            message: 'Chưa nối Facebook (xem docs/FACEBOOK.md). Đang dùng comment giả lập.' },
+    );
+  });
+
+  // Đọc một video live cụ thể: { videoId } ; bỏ trống = quay lại tự tìm live đang phát
+  app.post('/api/facebook/live', async (req, res) => {
+    if (!fb) return bad(res, new Error('Chưa cấu hình Facebook'), 409);
+    try {
+      const id = String(req.body?.videoId ?? '').trim();
+      if (id) await fb.attach(id);
+      else fb.auto();
+      fb.start();
+      res.json(fb.status());
+    } catch (e) {
+      bad(res, e);
+    }
+  });
+
   // Buổi live mới: xoá hết mã, comment, đơn cũ
   app.post('/api/reset', (_req, res) => {
     db.reset();
+    fb?.reset();
     for (const r of clients) r.write('data: update\n\n');
     res.json(db.stats());
   });
@@ -127,6 +184,14 @@ export function createApp(db = openDb()) {
 }
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop()!)) {
+  loadEnv();
   const port = Number(process.env.PORT ?? 3000);
-  createApp().listen(port, () => console.log(`Chạy tại http://localhost:${port}`));
+  const password = process.env.APP_PASSWORD || undefined;
+  const app = createApp(openDb(), { fbConfig: fbConfigFromEnv(), password });
+  app.listen(port, () => {
+    console.log(`Chạy tại http://localhost:${port}`);
+    console.log(app.locals.fb ? 'Facebook: đã cấu hình, đang tìm buổi live…' : 'Facebook: chưa cấu hình (dùng comment giả lập)');
+    if (!password) console.log('Cảnh báo: chưa đặt APP_PASSWORD, ai mở được địa chỉ này đều dùng được.');
+    app.locals.fb?.start();
+  });
 }

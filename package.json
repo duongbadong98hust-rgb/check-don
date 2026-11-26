@@ -7,9 +7,13 @@
   "scripts": {
     "start": "node src/server.ts",
     "dev": "node --watch src/server.ts",
-    "test": "node --test \"test/*.test.ts\""
+    "test": "node --test \"test/*.test.ts\"",
+    "fb:check": "node scripts/fb-check.ts",
+    "fb:token": "node scripts/fb-token.ts"
   },
-  "engines": { "node": ">=22.18" },
+  "engines": {
+    "node": ">=22.18"
+  },
   "dependencies": {
     "express": "^4.21.2"
   }

@@ -6,6 +6,7 @@ export interface CommentIn {
   name: string;
   text: string;
   ts?: number; // giờ comment (ms). Facebook sẽ cung cấp created_time.
+  fbId?: string; // ID comment trên Facebook; đã có rồi thì bỏ qua
 }
 
 interface BidRow {
@@ -37,13 +38,14 @@ export function createLive(db: Db, onChange: () => void = () => {}) {
       if (!name || !text) throw new Error('Thiếu tên hoặc nội dung comment');
       const userId = c.userId?.trim() || 'name:' + name.toLowerCase();
       const ts = c.ts ?? Date.now();
+      if (c.fbId && raw.prepare('SELECT 1 FROM comments WHERE fb_id = ?').get(c.fbId)) return null; // đã nhận rồi
       const codes = extractCodes(text, db.usedCodes());
 
       raw.exec('BEGIN');
       try {
         const info = raw
-          .prepare('INSERT INTO comments (user_id, name, text, ts, codes) VALUES (?, ?, ?, ?, ?)')
-          .run(userId, name, text, ts, codes.join(' '));
+          .prepare('INSERT INTO comments (user_id, name, text, ts, codes, fb_id) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(userId, name, text, ts, codes.join(' '), c.fbId ?? null);
         const commentId = Number(info.lastInsertRowid);
         const added: string[] = [];
         for (const code of codes) {

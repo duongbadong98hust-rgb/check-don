@@ -20,7 +20,13 @@ Cần Node.js ≥ 22.18 (chạy TypeScript trực tiếp, SQLite có sẵn, khô
 - Nút **Chốt ngay dưới từng comment** (chốt đúng người đó, không cần họ dẫn đầu).
 - Bảng mã: ai comment sớm nhất (theo giờ comment) dẫn đầu; bấm **Chốt**, **Bỏ**, hoặc **Hủy, chuyển người kế**.
 - Đơn theo khách: gom các mã đã chốt, tổng tiền, đánh dấu **Đã CK**, **in bill A6**.
-- Hiện đang dùng comment giả lập (ô nhập tay + nút tự chạy).
+- Comment giả lập (ô nhập tay + nút tự chạy) để thử, hoặc **Facebook Live thật** nếu đã cấu hình.
+
+**Facebook** (`docs/FACEBOOK.md`)
+- Đọc comment live qua Graph API chính thức (chỉ đọc), tự tìm buổi live đang phát, không nhận trùng comment.
+- `npm run fb:token` đổi token, `npm run fb:check` kiểm tra kết nối. Token cất trong `.env` (không lên GitHub).
+- `APP_PASSWORD` trong `.env` để đặt mật khẩu cho trang web.
+- ⚠ Mới test với Facebook giả, chưa thử với Facebook thật.
 
 ## API chính
 - `POST /api/live/comments` `{name, text, userId?, ts?}` — cửa nhận comment; Facebook sẽ gọi vào đây.
@@ -28,5 +34,5 @@ Cần Node.js ≥ 22.18 (chạy TypeScript trực tiếp, SQLite có sẵn, khô
 - `GET /print?batch=&layout=2x4` (tem), `GET /bill?user=` (bill)
 
 ## Kế tiếp
-- Nối Facebook Live qua Graph API (chỉ đọc comment, qua app chính thức).
+- Thử với Facebook thật và chỉnh theo kết quả.
 - Tuỳ chọn: bot nhắn Messenger xin thông tin giao hàng, đối chiếu chuyển khoản.

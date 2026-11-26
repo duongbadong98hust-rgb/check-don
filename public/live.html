@@ -12,6 +12,10 @@
   header { display:flex; align-items:center; gap:12px; padding:8px 12px; background:var(--card); border-bottom:1px solid var(--line); flex-wrap:wrap; }
   header a { color:var(--accent); text-decoration:none; }
   header .stats { margin-left:auto; color:var(--muted); font-size:.85rem; }
+  #fb { font-size:.8rem; border-radius:999px; padding:2px 10px; background:var(--line); color:var(--muted); max-width:100%; }
+  #fb.connected { background:var(--ok); color:#fff; }
+  #fb.searching { background:var(--warn); color:#fff; }
+  #fb.error { background:#dc2626; color:#fff; }
   #conn { width:10px; height:10px; border-radius:50%; background:#999; display:inline-block; }
   #conn.on { background:var(--ok); }
   nav.tabs { display:none; background:var(--card); border-bottom:1px solid var(--line); }
@@ -68,6 +72,7 @@
 <header>
   <b>Màn hình live</b><span id="conn" title="Kết nối realtime"></span>
   <a href="/">← Tạo mã & in tem</a>
+  <span id="fb">Facebook: …</span>
   <span class="stats" id="stats"></span>
 </header>
 <div id="err"></div>
@@ -206,6 +211,20 @@ const es = new EventSource('/api/live/stream');
 es.onopen = () => { $('conn').classList.add('on'); refresh(); };
 es.onerror = () => $('conn').classList.remove('on');
 es.onmessage = () => { clearTimeout(timer); timer = setTimeout(refresh, 80); };
+
+// Trạng thái Facebook (hỏi 3 giây một lần)
+async function fbStatus() {
+  try {
+    const s = await (await fetch('/api/facebook/status')).json();
+    const b = $('fb');
+    b.className = s.configured ? s.state : '';
+    b.textContent = !s.configured ? 'Facebook: chưa nối (giả lập)'
+      : s.state === 'connected' ? `Facebook: đang đọc live${s.liveTitle ? ' “' + s.liveTitle + '”' : ''} · ${s.comments} comment`
+      : 'Facebook: ' + s.message;
+    b.title = s.message;
+  } catch { /* mất mạng thì giữ nguyên */ }
+}
+fbStatus(); setInterval(fbStatus, 3000);
 
 // Tabs (điện thoại)
 $('tabs').addEventListener('click', (e) => {
