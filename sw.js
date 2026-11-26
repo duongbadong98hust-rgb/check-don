@@ -1,5 +1,5 @@
 // Lưu sẵn các file của app để mở nhanh; luôn ưu tiên bản mới trên mạng.
-const CACHE = 'checkdon-v1';
+const CACHE = 'checkdon-v2';
 const CORE = ['./', 'index.html', 'style.css', 'app.js', 'config.js', 'manifest.webmanifest', 'icon-192.png',
   'vendor/supabase.js', 'vendor/zxing-reader.js', 'vendor/tesseract.min.js'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(CORE)).then(() => self.skipWaiting())); });
