@@ -549,7 +549,7 @@
     try {
       const used = await usedBytes();
       const pct = Math.round((used / (1024 * 1024 * 1024)) * 100);
-      $('usage').textContent = `Bộ nhớ ảnh: ${mb(used)} MB / 1.024 MB (${pct}%). Ảnh tự xoá sau 3 tháng.`;
+      $('usage').textContent = `Phiên bản 5 · Bộ nhớ ảnh: ${mb(used)} MB / 1.024 MB (${pct}%). Ảnh tự xoá sau 3 tháng.`;
       let warn = '';
       if (used > 0.85 * 1024 * 1024 * 1024) warn = `⚠️ Bộ nhớ ảnh đã dùng ${pct}%. Khi gần đầy, app sẽ tự xoá các đơn cũ nhất.`;
       const tw = JSON.parse(storageGet('trim_warning') || 'null');
