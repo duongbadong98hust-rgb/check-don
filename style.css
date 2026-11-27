@@ -41,7 +41,7 @@ input:focus { outline: 2px solid var(--brand); border-color: transparent; }
 .status.ok { background: #e8f6ee; color: var(--ok); }
 .banner { padding: 10px 12px; border-radius: 10px; margin-top: 10px; font-size: 15px; }
 .banner.warn { background: var(--warn-bg); color: var(--warn); }
-.label-preview { width: 100%; max-height: 180px; object-fit: contain; margin-top: 10px; border-radius: 8px; background: #000; }
+.label-preview { width: 100%; max-height: 260px; object-fit: contain; margin-top: 10px; border-radius: 8px; background: #fff; border: 1px solid var(--line); }
 .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
 .grid .ph { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: #ddd; }
 .grid .ph img { width: 100%; height: 100%; object-fit: cover; display: block; }

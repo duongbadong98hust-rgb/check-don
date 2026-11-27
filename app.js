@@ -122,15 +122,23 @@
       || clean.find((t) => /^[A-Z0-9]{8,30}$/i.test(t))
       || clean[0] || '';
   }
-  async function readQR(src) {
+  // Đọc mã vận đơn. Trả về { code, quad }: quad = 4 góc mã QR (toạ độ ảnh gốc) nếu có
+  async function readCodes(src) {
+    const pick = (items, k) => {
+      const qr = items.filter((x) => x.isQR);
+      const code = pickCode((qr.length ? qr : items).map((x) => x.text));
+      if (!code) return null;
+      const hit = items.find((x) => x.text.trim() === code && x.isQR && x.pts && x.pts.length === 4);
+      return { code, quad: hit ? hit.pts.map((p) => ({ x: p.x * k, y: p.y * k })) : null };
+    };
     // 1) Trình đọc có sẵn của trình duyệt (Android Chrome)
     if ('BarcodeDetector' in window) {
       try {
         const det = new window.BarcodeDetector({ formats: ['qr_code', 'code_128'] });
-        const found = await det.detect(drawScaled(src, 1600));
-        const qr = found.filter((f) => f.format === 'qr_code').map((f) => f.rawValue);
-        const code = pickCode(qr.length ? qr : found.map((f) => f.rawValue));
-        if (code) return code;
+        const c = drawScaled(src, 1600);
+        const found = await det.detect(c);
+        const r = pick(found.map((f) => ({ text: f.rawValue, isQR: f.format === 'qr_code', pts: f.cornerPoints })), src.width / c.width);
+        if (r) return r;
       } catch { /* dùng cách 2 */ }
     }
     // 2) ZXing (mọi điện thoại), thử vài cỡ ảnh
@@ -141,11 +149,53 @@
       const res = await window.ZXingWASM.readBarcodes(data, {
         formats: ['QRCode', 'Code128'], tryHarder: true, maxNumberOfSymbols: 4,
       });
-      const qr = res.filter((r) => r.format === 'QRCode').map((r) => r.text);
-      const code = pickCode(qr.length ? qr : res.map((r) => r.text));
-      if (code) return code;
+      const r = pick(res.map((x) => ({
+        text: x.text, isQR: x.format === 'QRCode',
+        pts: x.position && [x.position.topLeft, x.position.topRight, x.position.bottomRight, x.position.bottomLeft],
+      })), src.width / c.width);
+      if (r) return r;
     }
-    return '';
+    return { code: '', quad: null };
+  }
+  async function readQR(src) { return (await readCodes(src)).code; }
+
+  // Trên tem SPX, khung "Đến:" nằm ngay phía trên-bên trái mã QR với tỉ lệ cố định theo cỡ mã QR.
+  // Từ vị trí mã QR suy ra khung người nhận (chỉ khi tem đặt thẳng đứng).
+  function toBoxFromQR(quad, src) {
+    if (!quad) return null;
+    const [tl, tr, , bl] = quad;
+    const ang = Math.atan2(tr.y - tl.y, tr.x - tl.x) * 180 / Math.PI;
+    if (Math.abs(ang) > 12) return null;                  // tem bị xoay: bỏ qua
+    const q = (Math.hypot(tr.x - tl.x, tr.y - tl.y) + Math.hypot(bl.x - tl.x, bl.y - tl.y)) / 2;
+    const left = Math.min(tl.x, bl.x), right = Math.max(tr.x, quad[2].x), top = Math.min(tl.y, tr.y);
+    const x0 = Math.max(0, left - q * 0.85), x1 = Math.min(src.width, right + q * 0.12);
+    const y0 = Math.max(0, top - q * 1.08), y1 = Math.min(src.height, top - q * 0.25);
+    if (x1 - x0 < 40 || y1 - y0 < 20) return null;
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+  function cropCanvas(src, box, width) {
+    const k = width / box.w;
+    const c = document.createElement('canvas');
+    c.width = Math.round(box.w * k); c.height = Math.round(box.h * k);
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(src, box.x, box.y, box.w, box.h, 0, 0, c.width, c.height);
+    return c;
+  }
+  // Đọc tên trong ảnh đã cắt khung người nhận: dòng ngay dưới "Đến:", hoặc dòng chữ đầu tiên
+  async function readNameInBox(src, box) {
+    const worker = await getOcr();
+    const c = cropCanvas(src, box, 1400);
+    const { data } = await worker.recognize(c, {}, { text: true, blocks: true });
+    const flat = flattenBlocks(data);
+    let name = extractName(flat);
+    if (!name) {
+      for (const l of flat.lines || []) {
+        const t = (l.text || '').replace(/[^\p{L}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+        if (t.length >= 2 && !isDen(t.split(' ')[0]) && (l.confidence ?? 100) > 45) { name = titleCase(t.split(' ').slice(0, 5).join(' ')); break; }
+      }
+    }
+    return name;
   }
 
   let ocrWorkerP = null;
@@ -181,7 +231,7 @@
           if (out.length) {
             const prev = out[out.length - 1].w;
             if (w.bbox.x0 - prev.bbox.x1 > h * 2.5) break;   // khoảng trống lớn: hết tên
-          } else if (w.confidence < 40) continue;
+          } else if (t.length < 2 || (w.confidence < 20 && t.length < 3)) continue;
           out.push({ t, w });
         }
         const name = out.map((o) => o.t).join(' ').trim();
@@ -200,9 +250,71 @@
   }
   async function readName(src) {
     const worker = await getOcr();
-    const c = drawScaled(src, 1600);
-    const { data } = await worker.recognize(c, {}, { text: true, blocks: true });
-    return { name: extractName(flattenBlocks(data)), data };
+    // Ảnh chụp cả tem thì chữ nhỏ: thử cỡ vừa trước, không thấy "Đến:" thì đọc lại ở cỡ lớn hơn
+    let c, data, flat, r;
+    for (const side of [1600, 2800]) {
+      if (c && Math.max(src.width, src.height) <= 1600 * 1.1) break;   // ảnh nhỏ: không cần đọc lại
+      c = drawScaled(src, side);
+      ({ data } = await worker.recognize(c, {}, { text: true, blocks: true }));
+      flat = flattenBlocks(data);
+      r = findToBox(flat);
+      if (r) break;
+    }
+    const k = src.width / c.width;   // đổi toạ độ về ảnh gốc
+    const box = r && { x: r.x * k, y: r.y * k, w: r.w * k, h: r.h * k };
+    return { name: extractName(flat), box, data };
+  }
+
+  // Tìm khung "Đến:" (tên + địa chỉ người nhận) trên tem
+  function findToBox(data) {
+    const lines = data.lines || [];
+    for (let i = 0; i < lines.length; i++) {
+      const den = (lines[i].words || []).find((w) => isDen(w.text));
+      if (!den) continue;
+      const h = Math.max(8, den.bbox.y1 - den.bbox.y0);
+      let x0 = den.bbox.x0, y0 = den.bbox.y0, x1 = den.bbox.x1, y1 = den.bbox.y1;
+      let prevBottom = den.bbox.y1;
+      for (let j = i + 1; j < Math.min(lines.length, i + 8); j++) {
+        const ws = (lines[j].words || []).filter((w) => w.bbox.x0 >= den.bbox.x0 - h * 1.5)
+          .sort((a, b) => a.bbox.x0 - b.bbox.x0);
+        const kept = [];
+        for (const w of ws) {
+          if (kept.length && w.bbox.x0 - kept[kept.length - 1].bbox.x1 > h * 3) break;
+          if (!kept.length && !hasLetter(w.text)) continue;
+          kept.push(w);
+        }
+        if (!kept.length) break;
+        const top = Math.min(...kept.map((w) => w.bbox.y0));
+        if (top - prevBottom > h * 1.6) break;          // khoảng trống lớn: hết khung
+        const bottom = Math.max(...kept.map((w) => w.bbox.y1));
+        x1 = Math.max(x1, kept[kept.length - 1].bbox.x1);
+        x0 = Math.min(x0, kept[0].bbox.x0);
+        y1 = Math.max(y1, bottom); prevBottom = bottom;
+      }
+      const m = h * 0.8;
+      return { x: Math.max(0, x0 - m), y: Math.max(0, y0 - m), w: (x1 - x0) + 2 * m, h: (y1 - y0) + 2 * m };
+    }
+    return null;
+  }
+
+  // Cắt khung "Đến:" ra ảnh JPEG nhỏ; không tìm thấy thì lưu cả tem (thu nhỏ)
+  async function cropToBox(src, box) {
+    let c;
+    if (box) {
+      const x = Math.max(0, Math.round(box.x)), y = Math.max(0, Math.round(box.y));
+      const w = Math.min(src.width - x, Math.round(box.w)), hh = Math.min(src.height - y, Math.round(box.h));
+      const k = Math.min(1, 1100 / w);
+      c = document.createElement('canvas');
+      c.width = Math.round(w * k); c.height = Math.round(hh * k);
+      c.getContext('2d').drawImage(src, x, y, w, hh, 0, 0, c.width, c.height);
+    } else {
+      c = drawScaled(src, 1100);
+    }
+    for (const q of [0.8, 0.65, 0.5]) {
+      const b = await toBlob(c, q);
+      if (b.size <= PHOTO_MAX_BYTES) return b;
+    }
+    return toBlob(c, 0.4);
   }
   // tesseract.js v5: lấy danh sách dòng/từ từ blocks
   function flattenBlocks(data) {
@@ -215,16 +327,23 @@
   async function scanLabel(file, statusEl) {
     status(statusEl, '⏳ Đang đọc tem…');
     const src = await loadBitmap(file);
-    const qrP = readQR(src).catch((e) => { console.error(e); return ''; });
-    const nameP = readName(src).catch((e) => { console.error(e); return { name: '' }; });
-    const tracking = await qrP;
+    getOcr().catch(() => {});   // tải sẵn bộ đọc chữ trong lúc đọc QR
+    const { code: tracking, quad } = await readCodes(src).catch((e) => { console.error(e); return { code: '', quad: null }; });
     status(statusEl, tracking ? `✓ Mã: ${tracking}. ⏳ Đang đọc tên khách…` : '⏳ Đang đọc tên khách…');
-    const { name } = await nameP;
-    return { tracking, name, src };
+    let box = toBoxFromQR(quad, src), name = '';
+    if (box) {
+      name = await readNameInBox(src, box).catch((e) => { console.error(e); return ''; });
+    } else {
+      const r = await readName(src).catch((e) => { console.error(e); return { name: '', box: null }; });
+      name = r.name; box = r.box;
+    }
+    const crop = await cropToBox(src, box).catch(() => null);
+    return { tracking, name, src, crop, found: !!box };
   }
 
   // ---------- Trạng thái màn đóng hàng ----------
   let photos = []; // { file, url }
+  let labelCrop = null; // ảnh cắt khung người nhận trên tem
   let saving = false;
 
   function renderPhotos() {
@@ -246,6 +365,7 @@
     photos = [];
     $('f-tracking').value = ''; $('f-customer').value = '';
     $('label-preview').hidden = true; $('label-preview').removeAttribute('src');
+    labelCrop = null;
     $('dup-warning').hidden = true;
     status($('label-status'), '');
     renderPhotos();
@@ -267,9 +387,16 @@
     const file = e.target.files[0]; e.target.value = '';
     if (!file) return;
     const prev = $('label-preview');
+    if (prev.src) URL.revokeObjectURL(prev.src);
     prev.src = URL.createObjectURL(file); prev.hidden = false;
+    labelCrop = null;
     try {
-      const { tracking, name } = await scanLabel(file, $('label-status'));
+      const { tracking, name, crop } = await scanLabel(file, $('label-status'));
+      if (crop) {
+        labelCrop = crop;
+        URL.revokeObjectURL(prev.src);
+        prev.src = URL.createObjectURL(crop);
+      }
       if (tracking) $('f-tracking').value = tracking.toUpperCase();
       if (name) $('f-customer').value = name;
       const miss = [];
@@ -311,10 +438,18 @@
       const folder = `${p.year}-${p.month}`;
       const stampId = packedAt.getTime().toString(36);
       const saved = [];
+      const safeTrk = tracking.replace(/[^A-Z0-9_-]/gi, '_');
+      if (labelCrop) {
+        status(st, '⏳ Đang tải ảnh tem…');
+        const path = `${folder}/${safeTrk}_${stampId}_tem.jpg`;
+        const { error } = await sb.storage.from(BUCKET).upload(path, labelCrop, { contentType: 'image/jpeg', upsert: false });
+        if (error && !/exists|duplicate/i.test(error.message || '')) throw error;
+        saved.push({ path, size: labelCrop.size, kind: 'label' });
+      }
       for (let i = 0; i < photos.length; i++) {
         status(st, `⏳ Đang xử lý và tải ảnh ${i + 1}/${photos.length}…`);
         const blob = await compressStamped(await loadBitmap(photos[i].file), lines);
-        const path = `${folder}/${tracking.replace(/[^A-Z0-9_-]/gi, '_')}_${stampId}_${i + 1}.jpg`;
+        const path = `${folder}/${safeTrk}_${stampId}_${i + 1}.jpg`;
         let lastErr;
         for (let attempt = 0; attempt < 3; attempt++) {
           const { error } = await sb.storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg', upsert: false });
@@ -427,14 +562,14 @@
 
   // ---------- Tra cứu ----------
   function resultHtml(r) {
-    const n = (r.photos || []).length;
+    const n = (r.photos || []).filter((p) => p.kind !== 'label').length;
     return `<button class="result" data-id="${r.id}">
       <b>${esc(r.customer || '(chưa có tên)')}</b>
       <div class="trk">${esc(r.tracking)}</div>
       <div class="meta">🕒 ${esc(fmtTime(r.packed_at))} · ${n} ảnh</div></button>`;
   }
   let lastResults = [];
-  async function search(q) {
+  async function search(q, autoOpen = false) {
     const st = $('search-status');
     q = (q || '').trim();
     status(st, '⏳ Đang tìm…');
@@ -444,6 +579,7 @@
       const safe = (s) => s.replace(/[,()%*\\"]/g, ' ').trim();
       const t = safe(q.toUpperCase()).replace(/\s+/g, '');
       const n = safe(noAccent(q));
+      // so khớp một phần mã: gõ 5 ký tự cuối (vd 6039B) cũng ra đơn
       query = query.or(`tracking.ilike.*${t}*,customer_norm.ilike.*${n}*`);
     }
     const { data, error } = await query;
@@ -452,9 +588,15 @@
     status(st, q ? (data.length ? `Tìm thấy ${data.length} đơn.` : 'Không tìm thấy đơn nào.') : '');
     $('results').innerHTML = (q ? '' : '<div class="section-title">Đơn mới đóng gần đây</div>')
       + data.map(resultHtml).join('');
-    if (q && data.length === 1) openDetail(data[0]);
+    if (autoOpen && q && data.length === 1) openDetail(data[0]);
   }
-  $('search-form').onsubmit = (e) => { e.preventDefault(); $('q').blur(); search($('q').value); };
+  let searchTimer;
+  $('q').oninput = () => {
+    clearTimeout(searchTimer);
+    const v = $('q').value.trim();
+    if (v.length >= 3 || v.length === 0) searchTimer = setTimeout(() => search(v), 450);
+  };
+  $('search-form').onsubmit = (e) => { e.preventDefault(); clearTimeout(searchTimer); $('q').blur(); search($('q').value, true); };
   $('results').onclick = (e) => {
     const b = e.target.closest('.result'); if (!b) return;
     const r = lastResults.find((x) => String(x.id) === b.dataset.id);
@@ -469,7 +611,7 @@
       const code = await readQR(src);
       if (!code) { status($('search-status'), 'Không đọc được mã QR. Chụp lại gần hơn hoặc gõ mã.', 'err'); return; }
       $('q').value = code.toUpperCase();
-      search(code);
+      search(code, true);
     } catch (err) {
       console.error(err);
       status($('search-status'), 'Lỗi khi đọc tem.', 'err');
@@ -485,7 +627,13 @@
       <div class="kv"><span>Mã vận đơn</span><b>${esc(r.tracking)}</b></div>
       <div class="kv"><span>Giờ đóng</span><b class="big">${esc(fmtTime(r.packed_at))}</b></div>`;
     const box = $('detail-photos');
-    box.innerHTML = (r.photos || []).map(() => '<img class="detail-photo" alt="">').join('');
+    let shownHang = false;
+    box.innerHTML = (r.photos || []).map((p) => {
+      if (p.kind === 'label') return '<div class="section-title">Ảnh tem (người nhận)</div><img class="detail-photo" alt="">';
+      const head = shownHang ? '' : '<div class="section-title">Ảnh hàng</div>';
+      shownHang = true;
+      return head + '<img class="detail-photo" alt="">';
+    }).join('');
     show('detail');
     const paths = (r.photos || []).map((p) => p.path);
     if (!paths.length) return;
@@ -564,5 +712,5 @@
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // để kiểm thử
-  window.__checkdon = { extractName, flattenBlocks, readQR, readName, loadBitmap, compressStamped, noAccent, fmtTime };
+  window.__checkdon = { scanLabel, readCodes, toBoxFromQR, readNameInBox, extractName, cropToBox, findToBox, flattenBlocks, readQR, readName, loadBitmap, compressStamped, noAccent, fmtTime };
 })();

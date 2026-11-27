@@ -43,7 +43,7 @@
         📷 Chụp tem đơn
         <input id="label-input" type="file" accept="image/*" capture="environment" hidden>
       </label>
-      <p class="hint">Chụp rõ phần mã QR và chữ "Đến:" trên tem.</p>
+      <p class="hint">Chụp cả tem, rõ mã QR và khung "Đến:". App lưu lại ảnh khung người nhận.</p>
       <div id="label-status" class="status" hidden></div>
       <img id="label-preview" class="label-preview" alt="" hidden>
 
@@ -77,7 +77,7 @@
     <header class="top"><h2>Tra cứu</h2></header>
     <div class="card">
       <form id="search-form" class="row">
-        <input id="q" type="search" placeholder="Tên khách hoặc mã vận đơn" autocomplete="off">
+        <input id="q" type="search" placeholder="Tên khách, hoặc 5 số cuối mã" autocomplete="off">
         <button class="btn primary" type="submit">Tìm</button>
       </form>
       <label class="btn ghost file-btn">
