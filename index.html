@@ -10,7 +10,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="style.css?v=7">
+  <link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
   <!-- ĐĂNG NHẬP -->
@@ -98,6 +98,38 @@
     </div>
   </section>
 
+  <!-- ĐI ĐƠN -->
+  <section id="screen-ship" class="screen" hidden>
+    <header class="top"><h2>Đi đơn</h2></header>
+    <div id="ship-remind" class="banner warn" hidden></div>
+    <div class="card">
+      <button id="ship-scan-btn" class="btn primary big">📷 Quét đơn đi</button>
+      <div id="ship-cam" class="ship-cam" hidden>
+        <video id="ship-video" playsinline muted autoplay></video>
+        <div class="ship-frame"></div>
+        <button id="ship-stop" class="btn ship-stop">Dừng quét</button>
+      </div>
+      <div id="ship-flash" class="ship-flash" hidden></div>
+      <form id="ship-manual" class="row" style="margin-top:10px">
+        <input id="ship-code" type="text" placeholder="Hoặc gõ mã vận đơn" autocapitalize="characters" autocomplete="off" spellcheck="false">
+        <button class="btn" type="submit">Thêm</button>
+      </form>
+    </div>
+    <div class="card">
+      <div class="row day-row" style="margin-top:0">
+        <label class="day-lbl">📅 Ngày <input id="ship-day" type="date"></label>
+      </div>
+      <div id="ship-summary" class="ship-summary"></div>
+      <div class="row" style="margin-top:10px">
+        <button id="ship-send-img" class="btn success" style="flex:1">🖼️ Gửi ảnh</button>
+        <button id="ship-send-xlsx" class="btn success" style="flex:1">📄 Gửi Excel</button>
+      </div>
+      <p class="hint">Bấm Gửi → chọn Zalo → chọn bạn shipper.</p>
+    </div>
+    <div id="ship-notdone" class="card" hidden></div>
+    <div id="ship-list"></div>
+  </section>
+
   <!-- CHI TIẾT ĐƠN -->
   <section id="screen-detail" class="screen" hidden>
     <header class="top">
@@ -112,6 +144,7 @@
 
   <nav id="tabs" class="tabs" hidden>
     <button data-tab="pack" class="active">📦<span>Đóng hàng</span></button>
+    <button data-tab="ship">🚚<span>Đi đơn</span></button>
     <button data-tab="search">🔍<span>Tra cứu</span></button>
   </nav>
 
@@ -121,6 +154,6 @@
   <script src="vendor/supabase.js"></script>
   <script src="vendor/zxing-reader.js"></script>
   <script src="vendor/tesseract.min.js"></script>
-  <script src="app.js?v=7"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>

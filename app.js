@@ -528,6 +528,8 @@
         if (!data.length) break;
         await deleteOrders(data);
       }
+      // Đơn đi quá 3 tháng
+      await sb.from('dispatches').delete().lt('day', cutoff.slice(0, 10));
       // 2) Gần đầy: xoá đơn cũ nhất
       let used = await usedBytes();
       if (used > SOFT_LIMIT) {
@@ -567,7 +569,7 @@
     try {
       const used = await usedBytes();
       const pct = Math.round((used / (1024 * 1024 * 1024)) * 100);
-      $('usage').textContent = `Phiên bản 7 · Bộ nhớ ảnh: ${mb(used)} MB / 1.024 MB (${pct}%). Ảnh tự xoá sau 3 tháng.`;
+      $('usage').textContent = `Phiên bản 8 · Bộ nhớ ảnh: ${mb(used)} MB / 1.024 MB (${pct}%). Ảnh tự xoá sau 3 tháng.`;
       let warn = '';
       if (used > 0.85 * 1024 * 1024 * 1024) warn = `⚠️ Bộ nhớ ảnh đã dùng ${pct}%. Khi gần đầy, app sẽ tự xoá các đơn cũ nhất.`;
       const tw = JSON.parse(storageGet('trim_warning') || 'null');
@@ -726,12 +728,312 @@
     } catch (err) { toast('Xoá không được: ' + (err.message || err)); }
   };
 
+  // ---------- Đi đơn (quét khi giao cho shipper) ----------
+  const ship = { day: '', rows: [], orderMap: new Map(), packedDay: [], stream: null, timer: null, lastCode: '', lastAt: 0, audio: null, busy: false };
+  function vnToday() {
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' })
+      .formatToParts(new Date()).map((x) => [x.type, x.value]));
+    return `${p.year}-${p.month}-${p.day}`;
+  }
+  const dayRange = (day) => {
+    const start = Date.parse(`${day}T00:00:00+07:00`);
+    return [new Date(start).toISOString(), new Date(start + 86400000).toISOString()];
+  };
+  const dmy = (day) => day.split('-').reverse().join('/');
+  function beep(ok) {
+    try {
+      const a = ship.audio; if (!a) return;
+      const o = a.createOscillator(), g = a.createGain();
+      o.frequency.value = ok ? 1250 : 330; o.type = ok ? 'sine' : 'square';
+      g.gain.value = 0.25; o.connect(g); g.connect(a.destination);
+      o.start(); o.stop(a.currentTime + (ok ? 0.12 : 0.45));
+      if (!ok && navigator.vibrate) navigator.vibrate([200, 80, 200]);
+    } catch { /* bỏ qua */ }
+  }
+  function shipFlash(msg, kind) {
+    const f = $('ship-flash'); f.textContent = msg; f.className = 'ship-flash ' + kind; f.hidden = false;
+  }
+  async function lookupCustomers(trackings) {
+    const need = [...new Set(trackings)].filter((t) => !ship.orderMap.has(t));
+    for (let i = 0; i < need.length; i += 100) {
+      const { data } = await sb.from('orders').select('tracking,customer,packed_at').in('tracking', need.slice(i, i + 100))
+        .order('packed_at', { ascending: true });
+      (data || []).forEach((o) => ship.orderMap.set(o.tracking, o.customer || ''));
+    }
+  }
+  async function loadShip(day) {
+    ship.day = day; $('ship-day').value = day;
+    $('ship-summary').textContent = '⏳ Đang tải…';
+    const { data, error } = await sb.from('dispatches').select('id,tracking,customer,scanned_at')
+      .eq('day', day).order('scanned_at', { ascending: true }).limit(3000);
+    if (error) {
+      $('ship-summary').textContent = /dispatches/.test(error.message || '')
+        ? '⚠️ Chưa cài bảng Đi đơn. Mở trang setup.html, sao chép lệnh và chạy lại trong Supabase SQL Editor.'
+        : 'Lỗi tải danh sách: ' + error.message;
+      return;
+    }
+    ship.rows = data;
+    const [a, b] = dayRange(day);
+    const { data: packed } = await sb.from('orders').select('tracking,customer,packed_at').gte('packed_at', a).lt('packed_at', b).limit(3000);
+    ship.packedDay = packed || [];
+    ship.packedDay.forEach((o) => ship.orderMap.set(o.tracking, o.customer || ''));
+    await lookupCustomers(ship.rows.map((r) => r.tracking));
+    renderShip();
+  }
+  function shipNameCounts() {
+    const m = new Map();
+    for (const r of ship.rows) {
+      const n = noAccent(r.customer || ship.orderMap.get(r.tracking) || '');
+      if (n) m.set(n, (m.get(n) || 0) + 1);
+    }
+    return m;
+  }
+  function renderShip(flashId) {
+    const rows = ship.rows, counts = shipNameCounts();
+    const dupNames = [...counts.values()].filter((v) => v > 1).length;
+    const notPacked = rows.filter((r) => !ship.orderMap.has(r.tracking)).length;
+    const sent = new Set(rows.map((r) => r.tracking));
+    const notShipped = ship.packedDay.filter((o) => !sent.has(o.tracking));
+    $('ship-summary').innerHTML = `${ship.day === vnToday() ? 'Hôm nay' : 'Ngày ' + esc(dmy(ship.day))}: <b>${rows.length}</b> đơn đi`
+      + (dupNames ? ` · <span class="tag-w">⚠️ ${dupNames} tên trùng</span>` : '')
+      + (notPacked ? ` · <span class="tag-w">⚠️ ${notPacked} đơn chưa đóng hàng</span>` : '');
+    const nd = $('ship-notdone');
+    if (notShipped.length) {
+      nd.hidden = false;
+      nd.innerHTML = `<details><summary>⚠️ <b>${notShipped.length}</b> đơn đã đóng ngày này nhưng <b>chưa quét đi</b></summary>`
+        + notShipped.map((o) => `<div class="kv">${esc(o.customer || '(chưa có tên)')} · <span class="trk">${esc(o.tracking)}</span></div>`).join('')
+        + '</details>';
+    } else nd.hidden = true;
+    $('ship-list').innerHTML = rows.map((r, i) => {
+      const name = r.customer || ship.orderMap.get(r.tracking) || '';
+      const tags = [];
+      if (name && counts.get(noAccent(name)) > 1) tags.push('<span class="tag-w">Trùng tên</span>');
+      if (!ship.orderMap.has(r.tracking)) tags.push('<span class="tag-r">Chưa đóng hàng</span>');
+      return { i, html: `<div class="srow${r.id === flashId ? ' flash' : ''}" data-id="${r.id}">
+        <div class="no">${i + 1}</div>
+        <div class="mid"><b>${esc(name || '(chưa có tên)')}</b><div class="trk">${esc(r.tracking)}</div>
+        ${tags.length ? `<div class="tags">${tags.join('')}</div>` : ''}</div>
+        <div class="tm">${esc(fmtTime(r.scanned_at).slice(11, 16))}</div>
+        <button class="x" aria-label="Xoá">✕</button></div>` };
+    }).reverse().map((x) => x.html).join('');
+    checkShipReminder();
+  }
+  async function addShip(raw) {
+    const code = (raw || '').trim().toUpperCase().replace(/\s+/g, '');
+    if (!code) return;
+    if (ship.busy) return; ship.busy = true;
+    try {
+      if (ship.day !== vnToday()) await loadShip(vnToday());
+      const existing = ship.rows.findIndex((r) => r.tracking === code);
+      if (existing >= 0) {
+        beep(false);
+        shipFlash(`🔴 TRÙNG MÃ: ${code} đã quét lúc ${fmtTime(ship.rows[existing].scanned_at).slice(11, 16)} (số ${existing + 1}). Không thêm lần 2.`, 'dup');
+        return;
+      }
+      await lookupCustomers([code]);
+      const customer = ship.orderMap.get(code) || '';
+      const { data, error } = await sb.from('dispatches').insert({ tracking: code, customer }).select('id,tracking,customer,scanned_at').single();
+      if (error) {
+        if (error.code === '23505') { beep(false); shipFlash(`🔴 TRÙNG MÃ: ${code} đã được quét hôm nay (máy khác).`, 'dup'); await loadShip(ship.day); return; }
+        throw error;
+      }
+      ship.rows.push(data);
+      const warns = [];
+      if (!ship.orderMap.has(code)) warns.push('chưa có ảnh đóng hàng');
+      if (customer && shipNameCounts().get(noAccent(customer)) > 1) warns.push(`trùng tên khách "${customer}" với đơn khác`);
+      beep(!warns.length);
+      shipFlash(`${warns.length ? '🟡' : '✅'} Số ${ship.rows.length}: ${customer || '(chưa có tên)'} · ${code}${warns.length ? ' · ⚠️ ' + warns.join(', ') : ''}`, warns.length ? 'warn' : 'ok');
+      renderShip(data.id);
+    } catch (err) {
+      console.error(err); beep(false);
+      shipFlash('Lỗi khi lưu: ' + (err.message || err), 'dup');
+    } finally { ship.busy = false; }
+  }
+  async function startShipCam() {
+    try {
+      if (!ship.audio) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) ship.audio = new AC(); }
+      ship.audio?.resume?.();
+      if (ship.day !== vnToday()) await loadShip(vnToday());
+      ship.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+      const v = $('ship-video'); v.srcObject = ship.stream; await v.play().catch(() => {});
+      $('ship-cam').hidden = false; $('ship-scan-btn').hidden = true;
+      prepareZxing();
+      const det = 'BarcodeDetector' in window ? new window.BarcodeDetector({ formats: ['qr_code'] }) : null;
+      const c = document.createElement('canvas');
+      const tick = async () => {
+        if (!ship.stream) return;
+        try {
+          if (v.readyState >= 2 && v.videoWidth) {
+            const k = Math.min(1, 900 / v.videoWidth);
+            c.width = Math.round(v.videoWidth * k); c.height = Math.round(v.videoHeight * k);
+            const ctx = c.getContext('2d', { willReadFrequently: true });
+            ctx.drawImage(v, 0, 0, c.width, c.height);
+            let code = '';
+            if (det) { const f = await det.detect(c); code = f[0]?.rawValue || ''; }
+            else {
+              const res = await window.ZXingWASM.readBarcodes(ctx.getImageData(0, 0, c.width, c.height), { formats: ['QRCode'], tryHarder: false, maxNumberOfSymbols: 1 });
+              code = res[0]?.text || '';
+            }
+            code = code.trim().toUpperCase();
+            const now = Date.now();
+            if (code && !(code === ship.lastCode && now - ship.lastAt < 4000)) {
+              ship.lastCode = code; ship.lastAt = now;
+              await addShip(code);
+            } else if (code) ship.lastAt = now;
+          }
+        } catch (e) { console.warn(e); }
+        ship.timer = setTimeout(tick, 180);
+      };
+      tick();
+    } catch (err) {
+      console.error(err);
+      shipFlash('Không mở được camera. Cho phép app dùng camera (Cài đặt → Safari → Camera) rồi thử lại, hoặc gõ mã bên dưới.', 'dup');
+      stopShipCam();
+    }
+  }
+  function stopShipCam() {
+    clearTimeout(ship.timer);
+    if (ship.stream) ship.stream.getTracks().forEach((t) => t.stop());
+    ship.stream = null;
+    $('ship-cam').hidden = true; $('ship-scan-btn').hidden = false;
+  }
+  $('ship-scan-btn').onclick = startShipCam;
+  $('ship-stop').onclick = stopShipCam;
+  $('ship-manual').onsubmit = (e) => {
+    e.preventDefault();
+    if (!ship.audio) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) ship.audio = new AC(); }
+    addShip($('ship-code').value); $('ship-code').value = '';
+  };
+  $('ship-day').onchange = () => { if ($('ship-day').value) loadShip($('ship-day').value); };
+  $('ship-list').onclick = async (e) => {
+    const x = e.target.closest('.x'); if (!x) return;
+    const id = Number(x.closest('.srow').dataset.id);
+    const r = ship.rows.find((y) => y.id === id); if (!r) return;
+    if (!confirm(`Xoá đơn ${r.tracking} khỏi danh sách đi đơn?`)) return;
+    const { error } = await sb.from('dispatches').delete().eq('id', id);
+    if (error) { toast('Xoá không được: ' + error.message); return; }
+    ship.rows = ship.rows.filter((y) => y.id !== id);
+    renderShip();
+  };
+
+  // ----- Báo cáo gửi shipper -----
+  function reportRows() {
+    return ship.rows.map((r, i) => [i + 1, r.customer || ship.orderMap.get(r.tracking) || '', r.tracking, fmtTime(r.scanned_at).slice(11, 16)]);
+  }
+  async function reportImage() {
+    const rows = reportRows(), W = 1080, rh = 58, head = 190, pad = 40;
+    const c = document.createElement('canvas'); c.width = W; c.height = head + rh * (rows.length + 1) + pad;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, c.height);
+    const font = (w, s) => `${w} ${s}px -apple-system, Roboto, "Segoe UI", Arial, sans-serif`;
+    ctx.fillStyle = '#ee4d2d'; ctx.font = font('bold', 46); ctx.textBaseline = 'top';
+    ctx.fillText(`DANH SÁCH ĐƠN ĐI ${dmy(ship.day)}`, pad, 40);
+    ctx.fillStyle = '#111'; ctx.font = font('bold', 38); ctx.fillText(`Tổng: ${rows.length} đơn`, pad, 110);
+    const cols = [pad, pad + 80, pad + 520, W - pad - 110];
+    let y = head;
+    ctx.fillStyle = '#f0f1f4'; ctx.fillRect(pad - 10, y, W - 2 * pad + 20, rh);
+    ctx.fillStyle = '#444'; ctx.font = font('bold', 28);
+    ['STT', 'Tên khách', 'Mã vận đơn', 'Giờ'].forEach((t, i) => ctx.fillText(t, cols[i], y + 15));
+    ctx.font = font('', 28);
+    const clip = (t, w) => { if (ctx.measureText(t).width <= w) return t; while (t.length > 1 && ctx.measureText(t + '…').width > w) t = t.slice(0, -1); return t + '…'; };
+    rows.forEach((r, i) => {
+      y += rh;
+      if (i % 2) { ctx.fillStyle = '#fafafa'; ctx.fillRect(pad - 10, y, W - 2 * pad + 20, rh); }
+      ctx.fillStyle = '#111';
+      ctx.fillText(String(r[0]), cols[0], y + 15);
+      ctx.fillText(clip(r[1] || '-', cols[2] - cols[1] - 20), cols[1], y + 15);
+      ctx.fillText(r[2], cols[2], y + 15);
+      ctx.fillText(r[3], cols[3], y + 15);
+    });
+    return toBlob(c, 0.9);
+  }
+  function crc32(buf) {
+    let crc = 0xFFFFFFFF;
+    for (let n = 0; n < buf.length; n++) {
+      let c = (crc ^ buf[n]) & 0xFF;
+      for (let k = 0; k < 8; k++) c = c & 1 ? (c >>> 1) ^ 0xEDB88320 : c >>> 1;
+      crc = (crc >>> 8) ^ c;
+    }
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+  function zipStore(files, type) {
+    const enc = new TextEncoder(), parts = [], central = []; let offset = 0;
+    for (const f of files) {
+      const name = enc.encode(f.name), data = enc.encode(f.text), crc = crc32(data), sz = data.length;
+      const lh = new DataView(new ArrayBuffer(30));
+      lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true);
+      lh.setUint16(12, 0x21, true); lh.setUint32(14, crc, true); lh.setUint32(18, sz, true); lh.setUint32(22, sz, true);
+      lh.setUint16(26, name.length, true);
+      parts.push(new Uint8Array(lh.buffer), name, data);
+      const ch = new DataView(new ArrayBuffer(46));
+      ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true);
+      ch.setUint16(14, 0x21, true); ch.setUint32(16, crc, true); ch.setUint32(20, sz, true); ch.setUint32(24, sz, true);
+      ch.setUint16(28, name.length, true); ch.setUint32(42, offset, true);
+      central.push(new Uint8Array(ch.buffer), name);
+      offset += 30 + name.length + sz;
+    }
+    const csize = central.reduce((a, b) => a + b.length, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+    end.setUint32(12, csize, true); end.setUint32(16, offset, true);
+    return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type });
+  }
+  function reportXlsx() {
+    const x = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+    const cell = (ref, v) => (typeof v === 'number' ? `<c r="${ref}"><v>${v}</v></c>` : `<c r="${ref}" t="inlineStr"><is><t>${x(v)}</t></is></c>`);
+    const all = [[`Danh sách đơn đi ${dmy(ship.day)} - Tổng ${ship.rows.length} đơn`], [], ['STT', 'Tên khách', 'Mã vận đơn', 'Giờ quét'], ...reportRows()];
+    const sheetRows = all.map((r, i) => `<row r="${i + 1}">${r.map((v, j) => cell('ABCD'[j] + (i + 1), v)).join('')}</row>`).join('');
+    const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cols><col min="1" max="1" width="6" customWidth="1"/><col min="2" max="2" width="28" customWidth="1"/><col min="3" max="3" width="24" customWidth="1"/><col min="4" max="4" width="10" customWidth="1"/></cols><sheetData>${sheetRows}</sheetData></worksheet>`;
+    return zipStore([
+      { name: '[Content_Types].xml', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>' },
+      { name: '_rels/.rels', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
+      { name: 'xl/workbook.xml', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Don di" sheetId="1" r:id="rId1"/></sheets></workbook>' },
+      { name: 'xl/_rels/workbook.xml.rels', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>' },
+      { name: 'xl/worksheets/sheet1.xml', text: sheet },
+    ], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  }
+  async function shareReport(kind) {
+    if (!ship.rows.length) { toast('Chưa có đơn đi nào trong ngày này'); return; }
+    const blob = kind === 'img' ? await reportImage() : reportXlsx();
+    const fname = `don-di-${ship.day}.${kind === 'img' ? 'jpg' : 'xlsx'}`;
+    const file = new File([blob], fname, { type: blob.type });
+    const text = `Đơn đi ${dmy(ship.day)}: ${ship.rows.length} đơn`;
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: text });
+      } else {
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fname; a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      }
+      if (ship.day === vnToday()) storageSet('ship_sent_' + ship.day, '1');
+      checkShipReminder();
+    } catch (err) {
+      if (err.name !== 'AbortError') toast('Không chia sẻ được: ' + (err.message || err));
+    }
+  }
+  $('ship-send-img').onclick = () => shareReport('img');
+  $('ship-send-xlsx').onclick = () => shareReport('xlsx');
+
+  // Nhắc gửi shipper sau 20:00 giờ VN
+  let remindToastDay = '';
+  function checkShipReminder() {
+    const today = vnToday();
+    const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', hour12: false }).format(new Date()));
+    const due = hour >= 20 && !storageGet('ship_sent_' + today);
+    const b = $('ship-remind');
+    b.textContent = due ? '⏰ Đã quá 20:00. Nhớ bấm Gửi ảnh / Gửi Excel để gửi danh sách đơn đi hôm nay cho shipper qua Zalo.' : '';
+    b.hidden = !due;
+    if (due && remindToastDay !== today && !$('tabs').hidden) { remindToastDay = today; toast('⏰ 20:00 rồi: gửi danh sách đơn đi cho shipper nhé (tab Đi đơn)', 6000); }
+  }
+  setInterval(() => { if (!$('tabs').hidden) checkShipReminder(); }, 60000);
+
   // ---------- Điều hướng ----------
   let activeTab = 'pack';
   function show(name) {
     for (const s of document.querySelectorAll('.screen')) s.hidden = s.id !== 'screen-' + name;
     $('tabs').hidden = name === 'login';
-    if (name === 'pack' || name === 'search') {
+    if (name !== 'ship' && typeof stopShipCam === 'function' && ship.stream) stopShipCam();
+    if (name === 'pack' || name === 'search' || name === 'ship') {
       activeTab = name;
       for (const b of $('tabs').querySelectorAll('button')) b.classList.toggle('active', b.dataset.tab === name);
     }
@@ -740,6 +1042,7 @@
     const b = e.target.closest('button'); if (!b) return;
     show(b.dataset.tab);
     if (b.dataset.tab === 'search' && !lastResults.length) search('');
+    if (b.dataset.tab === 'ship') loadShip(ship.day && ship.day !== vnToday() ? ship.day : vnToday());
   };
 
   // ---------- Đăng nhập ----------
@@ -762,7 +1065,7 @@
     show('pack');
     housekeeping();
     // Tải trước bộ đọc chữ cho lần quét đầu nhanh hơn
-    setTimeout(() => { getOcr().catch(() => {}); prepareZxing(); }, 800);
+    setTimeout(() => { getOcr().catch(() => {}); prepareZxing(); checkShipReminder(); }, 800);
   }
 
   async function start() {
@@ -779,5 +1082,5 @@
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   // để kiểm thử
-  window.__checkdon = { scanLabel, readCodes, toBoxFromQR, readNameInBox, extractName, cropToBox, findToBox, flattenBlocks, readQR, readName, loadBitmap, compressStamped, noAccent, fmtTime };
+  window.__checkdon = { reportXlsx, reportImage, addShip, ship, scanLabel, readCodes, toBoxFromQR, readNameInBox, extractName, cropToBox, findToBox, flattenBlocks, readQR, readName, loadBitmap, compressStamped, noAccent, fmtTime };
 })();
