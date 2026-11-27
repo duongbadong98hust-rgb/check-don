@@ -94,6 +94,13 @@
     lines.forEach((t, i) => ctx.fillText(t, x + padX, y + padX * 0.6 + i * lh));
   }
 
+  async function makeThumb(src) {
+    const side = 320, s0 = Math.min(src.width, src.height);
+    const c = document.createElement('canvas'); c.width = side; c.height = side;
+    c.getContext('2d').drawImage(src, (src.width - s0) / 2, (src.height - s0) / 2, s0, s0, 0, 0, side, side);
+    return toBlob(c, 0.6);
+  }
+
   async function compressStamped(src, lines) {
     for (const side of [PHOTO_MAX_SIDE, 1080, 900]) {
       const c = drawScaled(src, side);
@@ -463,6 +470,15 @@
           throw lastErr;
         }
         saved.push({ path, size: blob.size });
+        if (i === 0) {
+          // ảnh nhỏ (~10KB) để hiện trong lưới tra cứu, đỡ tốn dung lượng mạng
+          try {
+            const tb = await makeThumb(await loadBitmap(photos[0].file));
+            const tpath = `${folder}/${safeTrk}_${stampId}_nho.jpg`;
+            const { error: te } = await sb.storage.from(BUCKET).upload(tpath, tb, { contentType: 'image/jpeg', upsert: false });
+            if (!te) saved.push({ path: tpath, size: tb.size, kind: 'thumb' });
+          } catch (e) { console.warn('thumb', e); }
+        }
       }
       status(st, '⏳ Đang lưu đơn…');
       const total = saved.reduce((a, s) => a + s.size, 0);
@@ -549,7 +565,7 @@
     try {
       const used = await usedBytes();
       const pct = Math.round((used / (1024 * 1024 * 1024)) * 100);
-      $('usage').textContent = `Phiên bản 5 · Bộ nhớ ảnh: ${mb(used)} MB / 1.024 MB (${pct}%). Ảnh tự xoá sau 3 tháng.`;
+      $('usage').textContent = `Phiên bản 6 · Bộ nhớ ảnh: ${mb(used)} MB / 1.024 MB (${pct}%). Ảnh tự xoá sau 3 tháng.`;
       let warn = '';
       if (used > 0.85 * 1024 * 1024 * 1024) warn = `⚠️ Bộ nhớ ảnh đã dùng ${pct}%. Khi gần đầy, app sẽ tự xoá các đơn cũ nhất.`;
       const tw = JSON.parse(storageGet('trim_warning') || 'null');
@@ -561,22 +577,65 @@
   }
 
   // ---------- Tra cứu ----------
-  function resultHtml(r) {
-    const n = (r.photos || []).filter((p) => p.kind !== 'label').length;
-    return `<button class="result" data-id="${r.id}">
-      <b>${esc(r.customer || '(chưa có tên)')}</b>
-      <div class="trk">${esc(r.tracking)}</div>
-      <div class="meta">🕒 ${esc(fmtTime(r.packed_at))} · ${n} ảnh</div></button>`;
+  const isProduct = (p) => !p.kind;
+  function thumbPath(r) {
+    const ph = r.photos || [];
+    return (ph.find((p) => p.kind === 'thumb') || ph.find((p) => p.kind === 'label') || ph.find(isProduct) || {}).path;
   }
-  let lastResults = [];
-  async function search(q, autoOpen = false) {
+  function dayLabel(d) {
+    const day = vnDate(d), today = vnDate(new Date()), yest = vnDate(Date.now() - 86400000);
+    return day === today ? `Hôm nay · ${day}` : day === yest ? `Hôm qua · ${day}` : day;
+  }
+  function cardHtml(r) {
+    const n = (r.photos || []).filter(isProduct).length;
+    return `<button class="card-o" data-id="${r.id}">
+      <div class="thumb"><img alt="" data-path="${esc(thumbPath(r) || '')}"><span class="cnt">${n} ảnh</span></div>
+      <div class="ci"><b>${esc(r.customer || '(chưa có tên)')}</b>
+      <div class="trk">…${esc(r.tracking.slice(-5))}</div>
+      <div class="meta">🕒 ${esc(fmtTime(r.packed_at).slice(11, 16))}</div></div></button>`;
+  }
+  const thumbUrls = new Map();
+  async function loadThumbs(root) {
+    const imgs = [...root.querySelectorAll('img[data-path]')].filter((i) => i.dataset.path && !i.src);
+    const need = [...new Set(imgs.map((i) => i.dataset.path).filter((p) => !thumbUrls.has(p)))];
+    if (need.length) {
+      const { data } = await sb.storage.from(BUCKET).createSignedUrls(need, 3600);
+      (data || []).forEach((d) => { if (d.signedUrl) thumbUrls.set(d.path, d.signedUrl); });
+    }
+    imgs.forEach((i) => { const u = thumbUrls.get(i.dataset.path); if (u) i.src = u; });
+  }
+  function renderResults(append) {
+    let html = '', lastDay = append ? $('results').dataset.lastDay : '';
+    const list = append ? lastResults.slice(-append) : lastResults;
+    for (const r of list) {
+      const d = vnDate(r.packed_at);
+      if (d !== lastDay) {
+        const cnt = lastResults.filter((x) => vnDate(x.packed_at) === d).length;
+        html += `${lastDay ? '</div>' : ''}<div class="day-h">${esc(dayLabel(r.packed_at))}</div><div class="ogrid">`;
+        lastDay = d;
+      }
+      html += cardHtml(r);
+    }
+    if (html) html += '</div>';
+    $('results').dataset.lastDay = lastDay;
+    if (append) $('results').insertAdjacentHTML('beforeend', html);
+    else $('results').innerHTML = html;
+    $('more-btn').hidden = !hasMore;
+    loadThumbs($('results'));
+  }
+  const PAGE = 40;
+  let lastResults = [], lastQ = '', hasMore = false;
+  async function search(q, autoOpen = false, more = false) {
     const st = $('search-status');
     q = (q || '').trim();
-    status(st, '⏳ Đang tìm…');
+    if (!more) { lastQ = q; status(st, '⏳ Đang tìm…'); }
+    const from = more ? lastResults.length : 0;
     let query = sb.from('orders').select('id,tracking,customer,packed_at,photos')
-      .order('packed_at', { ascending: false }).limit(50);
+      .order('packed_at', { ascending: false }).range(from, from + PAGE - 1);
+    const day = $('day').value;   // yyyy-mm-dd, theo giờ Việt Nam
+    if (day) query = query.gte('packed_at', `${day}T00:00:00+07:00`).lt('packed_at', new Date(Date.parse(`${day}T00:00:00+07:00`) + 86400000).toISOString());
     if (q) {
-      const safe = (s) => s.replace(/[,()%*\\"]/g, ' ').trim();
+      const safe = (x) => x.replace(/[,()%*\\"]/g, ' ').trim();
       const t = safe(q.toUpperCase()).replace(/\s+/g, '');
       const n = safe(noAccent(q));
       // so khớp một phần mã: gõ 5 ký tự cuối (vd 6039B) cũng ra đơn
@@ -584,11 +643,12 @@
     }
     const { data, error } = await query;
     if (error) { status(st, 'Lỗi tìm kiếm: ' + error.message, 'err'); return; }
-    lastResults = data;
-    status(st, q ? (data.length ? `Tìm thấy ${data.length} đơn.` : 'Không tìm thấy đơn nào.') : '');
-    $('results').innerHTML = (q ? '' : '<div class="section-title">Đơn mới đóng gần đây</div>')
-      + data.map(resultHtml).join('');
-    if (autoOpen && q && data.length === 1) openDetail(data[0]);
+    if (!more && q !== lastQ) return;   // đã gõ tiếp, bỏ kết quả cũ
+    hasMore = data.length === PAGE;
+    if (more) { lastResults = lastResults.concat(data); renderResults(data.length); }
+    else { lastResults = data; renderResults(0); }
+    status(st, (q || day) ? (lastResults.length ? `Tìm thấy ${lastResults.length}${hasMore ? '+' : ''} đơn.` : 'Không tìm thấy đơn nào.') : '');
+    if (autoOpen && q && lastResults.length === 1) openDetail(lastResults[0]);
   }
   let searchTimer;
   $('q').oninput = () => {
@@ -597,8 +657,11 @@
     if (v.length >= 3 || v.length === 0) searchTimer = setTimeout(() => search(v), 450);
   };
   $('search-form').onsubmit = (e) => { e.preventDefault(); clearTimeout(searchTimer); $('q').blur(); search($('q').value, true); };
+  $('day').onchange = () => { $('day-clear').hidden = !$('day').value; search($('q').value); };
+  $('day-clear').onclick = () => { $('day').value = ''; $('day-clear').hidden = true; search($('q').value); };
+  $('more-btn').onclick = () => search(lastQ, false, true);
   $('results').onclick = (e) => {
-    const b = e.target.closest('.result'); if (!b) return;
+    const b = e.target.closest('.card-o'); if (!b) return;
     const r = lastResults.find((x) => String(x.id) === b.dataset.id);
     if (r) openDetail(r);
   };
@@ -629,13 +692,14 @@
     const box = $('detail-photos');
     let shownHang = false;
     box.innerHTML = (r.photos || []).map((p) => {
+      if (p.kind === 'thumb') return '';
       if (p.kind === 'label') return '<div class="section-title">Ảnh tem (người nhận)</div><img class="detail-photo" alt="">';
       const head = shownHang ? '' : '<div class="section-title">Ảnh hàng</div>';
       shownHang = true;
       return head + '<img class="detail-photo" alt="">';
     }).join('');
     show('detail');
-    const paths = (r.photos || []).map((p) => p.path);
+    const paths = (r.photos || []).filter((p) => p.kind !== 'thumb').map((p) => p.path);
     if (!paths.length) return;
     const { data, error } = await sb.storage.from(BUCKET).createSignedUrls(paths, 3600);
     if (error) { box.innerHTML = '<div class="status err">Không tải được ảnh.</div>'; return; }
@@ -655,6 +719,7 @@
       toast('Đã xoá đơn');
       lastResults = lastResults.filter((x) => x.id !== current.id);
       $('results').querySelector(`[data-id="${current.id}"]`)?.remove();
+      lastResults = lastResults.filter((x) => x.id !== current.id);
       show('search'); showUsage();
     } catch (err) { toast('Xoá không được: ' + (err.message || err)); }
   };

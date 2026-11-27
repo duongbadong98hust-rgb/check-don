@@ -10,7 +10,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
   <!-- ĐĂNG NHẬP -->
@@ -80,6 +80,10 @@
         <input id="q" type="search" placeholder="Tên khách, hoặc 5 số cuối mã" autocomplete="off">
         <button class="btn primary" type="submit">Tìm</button>
       </form>
+      <div class="row day-row">
+        <label class="day-lbl">📅 Ngày <input id="day" type="date"></label>
+        <button id="day-clear" class="btn ghost" type="button" hidden>Bỏ lọc</button>
+      </div>
       <label class="btn ghost file-btn">
         📷 Quét tem để tìm
         <input id="search-label-input" type="file" accept="image/*" capture="environment" hidden>
@@ -87,6 +91,7 @@
       <div id="search-status" class="status" hidden></div>
     </div>
     <div id="results"></div>
+    <button id="more-btn" class="btn ghost" style="width:100%" hidden>Xem thêm đơn cũ hơn</button>
     <div class="card small">
       <div id="usage" class="muted"></div>
       <button id="logout-btn" class="btn ghost">Đăng xuất</button>
@@ -116,6 +121,6 @@
   <script src="vendor/supabase.js"></script>
   <script src="vendor/zxing-reader.js"></script>
   <script src="vendor/tesseract.min.js"></script>
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>

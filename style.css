@@ -74,3 +74,20 @@ input:focus { outline: 2px solid var(--brand); border-color: transparent; }
 .login-box .btn { margin-top: 18px; }
 .logo { font-size: 56px; }
 .login-box h1 { margin: 4px 0 0; }
+.day-h { margin: 16px 4px 6px; font-weight: 700; font-size: 15px; color: var(--text); }
+.ogrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+@media (min-width: 480px) { .ogrid { grid-template-columns: repeat(3, 1fr); } }
+.card-o { display: block; padding: 0; border: 0; text-align: left; background: var(--card); border-radius: 12px;
+  overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,.08); font: inherit; color: inherit; }
+.card-o .thumb { position: relative; aspect-ratio: 1; background: #e4e6ea; }
+.card-o .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.card-o .thumb img:not([src]) { visibility: hidden; }
+.card-o .cnt { position: absolute; right: 6px; bottom: 6px; background: rgba(0,0,0,.6); color: #fff;
+  font-size: 12px; padding: 2px 7px; border-radius: 10px; }
+.card-o .ci { padding: 8px 10px 10px; }
+.card-o b { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-o .trk { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--muted); }
+.card-o .meta { font-size: 13px; color: var(--muted); }
+.day-row { margin-top: 10px; align-items: center; }
+.day-lbl { display: flex; align-items: center; gap: 8px; margin: 0; flex: 1; color: var(--text); font-size: 15px; }
+.day-lbl input { flex: 1; padding: 10px; font-size: 16px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--text); min-width: 0; }
