@@ -168,7 +168,7 @@
     if (Math.abs(ang) > 12) return null;                  // tem bị xoay: bỏ qua
     const q = (Math.hypot(tr.x - tl.x, tr.y - tl.y) + Math.hypot(bl.x - tl.x, bl.y - tl.y)) / 2;
     const left = Math.min(tl.x, bl.x), right = Math.max(tr.x, quad[2].x), top = Math.min(tl.y, tr.y);
-    const x0 = Math.max(0, left - q * 0.85), x1 = Math.min(src.width, right + q * 0.12);
+    const x0 = Math.max(0, left - q * 1.25), x1 = Math.min(src.width, right + q * 0.12);
     const y0 = Math.max(0, top - q * 1.08), y1 = Math.min(src.height, top - q * 0.25);
     if (x1 - x0 < 40 || y1 - y0 < 20) return null;
     return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
