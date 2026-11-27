@@ -73,25 +73,28 @@
   const toBlob = (c, q) => new Promise((r) => c.toBlob(r, 'image/jpeg', q));
 
   // In tên khách, mã vận đơn, ngày giờ lên góc dưới ảnh
-  function stamp(canvas, lines) {
-    const ctx = canvas.getContext('2d');
-    const fs = Math.max(18, Math.round(Math.min(canvas.width, canvas.height) / 22));
+  // In tên khách, mã vận đơn, ngày giờ vào dải đen NỐI THÊM bên dưới ảnh (không che ảnh hàng)
+  function stamp(photo, lines) {
+    const W = photo.width;
+    const fs = Math.max(16, Math.round(W / 26));
+    const padX = Math.round(fs * 0.6), lh = Math.round(fs * 1.3);
+    lines = lines.filter(Boolean);
+    const bandH = lh * lines.length + padX * 2;
+    const c = document.createElement('canvas');
+    c.width = W; c.height = photo.height + bandH;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(photo, 0, 0);
+    ctx.fillStyle = '#111'; ctx.fillRect(0, photo.height, W, bandH);
     ctx.font = `bold ${fs}px -apple-system, Roboto, "Segoe UI", Arial, sans-serif`;
-    const padX = Math.round(fs * 0.5), lh = Math.round(fs * 1.3);
-    const maxW = canvas.width - padX * 4;
+    const maxW = W - padX * 2;
     const fit = (t) => {
       if (ctx.measureText(t).width <= maxW) return t;
       while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1);
       return t + '…';
     };
-    lines = lines.filter(Boolean).map(fit);
-    const boxW = Math.max(...lines.map((t) => ctx.measureText(t).width)) + padX * 2;
-    const boxH = lh * lines.length + padX;
-    const x = padX, y = canvas.height - boxH - padX;
-    ctx.fillStyle = 'rgba(0,0,0,0.62)';
-    ctx.fillRect(x, y, boxW, boxH);
     ctx.fillStyle = '#fff'; ctx.textBaseline = 'top';
-    lines.forEach((t, i) => ctx.fillText(t, x + padX, y + padX * 0.6 + i * lh));
+    lines.map(fit).forEach((t, i) => ctx.fillText(t, padX, photo.height + padX + i * lh));
+    return c;
   }
 
   async function makeThumb(src) {
@@ -103,14 +106,13 @@
 
   async function compressStamped(src, lines) {
     for (const side of [PHOTO_MAX_SIDE, 1080, 900]) {
-      const c = drawScaled(src, side);
-      stamp(c, lines);
+      const c = stamp(drawScaled(src, side), lines);
       for (const q of [0.72, 0.62, 0.52, 0.44]) {
         const b = await toBlob(c, q);
         if (b.size <= PHOTO_MAX_BYTES) return b;
       }
     }
-    const c = drawScaled(src, 800); stamp(c, lines);
+    const c = stamp(drawScaled(src, 800), lines);
     return toBlob(c, 0.45);
   }
 
@@ -565,7 +567,7 @@
     try {
       const used = await usedBytes();
       const pct = Math.round((used / (1024 * 1024 * 1024)) * 100);
-      $('usage').textContent = `Phiên bản 6 · Bộ nhớ ảnh: ${mb(used)} MB / 1.024 MB (${pct}%). Ảnh tự xoá sau 3 tháng.`;
+      $('usage').textContent = `Phiên bản 7 · Bộ nhớ ảnh: ${mb(used)} MB / 1.024 MB (${pct}%). Ảnh tự xoá sau 3 tháng.`;
       let warn = '';
       if (used > 0.85 * 1024 * 1024 * 1024) warn = `⚠️ Bộ nhớ ảnh đã dùng ${pct}%. Khi gần đầy, app sẽ tự xoá các đơn cũ nhất.`;
       const tw = JSON.parse(storageGet('trim_warning') || 'null');
@@ -580,7 +582,7 @@
   const isProduct = (p) => !p.kind;
   function thumbPath(r) {
     const ph = r.photos || [];
-    return (ph.find((p) => p.kind === 'thumb') || ph.find((p) => p.kind === 'label') || ph.find(isProduct) || {}).path;
+    return (ph.find((p) => p.kind === 'thumb') || ph.find(isProduct) || ph.find((p) => p.kind === 'label') || {}).path;
   }
   function dayLabel(d) {
     const day = vnDate(d), today = vnDate(new Date()), yest = vnDate(Date.now() - 86400000);
